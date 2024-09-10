@@ -1,0 +1,536 @@
+---
+title: "ST661 - Group 7 Team Project"
+author: "MALLIKARJUNA GOWDRA BASAVARAJAPPA, MARK WALTER ALFRED,SWATHI PYDI, UDIT JAYANT DAYANI"
+date: "2023-12-02"
+output:
+  html_document:
+    code_folding: hide
+    fig_caption: true
+#runtime: shiny
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+# **Introduction**
+
+**What is the data about?**
+The data was provided in 2 csv files, the 1st detailed the GDP for 130 countries between 1950 and 2021 while the 2nd included the gender wage gap, in percentages, for 38 of these countries for a subset of the years between 1970 and 2015. We enriched the data to include the Regions the countries belonged to, opening further opportunities for data analysis by region.
+
+**What questions will you look at? What methods will you use?**
+Through data wrangling and analysis, we created plots and tibbles to help answer the following questions:-
+
+1.	Which countries showed the largest and smallest gender wage gaps and were these consistent over the time period analysed?
+    a.	What did this look like year by year between 2000-2015 (all countries)
+
+    b.	What did this look like decade by decade since 1980 (for the 6 countries this data is available). 
+
+2.	Were there particular gender wage gap trends in certain regions in the world?
+
+3.	What correlation (if any) is evident between the gender wage gap and a country’s gdp?
+```{r }
+library(shiny)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(readr)
+
+
+GDP_Per_Capita <- read.csv("gdp-per-capita-2018-u.s.-dollars.csv")
+
+
+paygap <- read.csv("gender-wage-gap-median-earnings-of-full-time-employees-oecd-percent.csv")
+
+```
+# **Data Wrangling**
+As mentioned in the introduction, the data was provided in 2 csv files and needed to be merged to create a complete dataset for analysis purposes. We wrangled the data into 2 datasets to answer the questions listed above:-
+
+1. Dataset 1:-
+        a.	Removed all years, prior to 2000 as the decision was made to focus on 2000-2015 for most of the analysis, since there was data available during this timeframe, for all 38 countries.
+        b.	For countries whose data was missing for any particular year during this 16 year period, its mean value was added for that year, as per an industry best practice.
+        c.	Each of the 38 countries, were bucketed into regions to enable deeper analysis of countries in close proximity to each other versus those which weren’t.
+        d.	The 2 datasets were merged into 1, based on “Country” which was common in both.
+        e.	Both the pre and post merged datasets were further adjusted to support the creation of plots e.g. pivot_longer, since the initial dataset had each year, as it’s own column in the dataset.
+
+2. Dataset 2:- This was  created to a scoped down version of gender-wage csv file, to only include the 6 countries for which there was data available for all years since 1980.
+```{r}
+new_col_names <- colnames(paygap)
+new_col_names <- gsub("^X", "", new_col_names)
+colnames(paygap) <- new_col_names
+
+#colnames(paygap)
+
+new_col_names <- colnames(GDP_Per_Capita)
+new_col_names <- gsub("^X", "", new_col_names)
+colnames(GDP_Per_Capita) <- new_col_names
+
+gdp_selected <- GDP_Per_Capita |>
+  select(Country, `2000`, `2001`, `2002`, `2003`, `2004`, `2005`, `2006`, `2007`, `2008`, `2009`, `2010`,`2011`, `2012`, `2013`, `2014`, `2015`)
+
+#function to add row mean where there are missing values for that country
+fill_na_with_row_mean <- function(row) {
+  row[is.na(row)] <- mean(row, na.rm = TRUE)
+  return(row)
+}
+paygap[, 2:ncol(paygap)] <- t(apply(paygap[, 2:ncol(paygap)], 1, fill_na_with_row_mean))
+
+
+#function to associate a region with each country
+findregion <- function(x) {
+  x
+  case_when(
+    x == "United States" | x == "Canada" | x == "Mexico" ~ "NorthAmerica",
+    x == "Japan" | x == "South Korea" | x == "Israel" ~ "Asia",
+    x == "New Zealand" |x == "Australia" ~ "Oceania",
+    x == "Chile" |x == "Colombia" |x == "Costa Rica" ~ "CentralSouthAmerica",
+    x == "Turkey" |x == "Czechia" |x == "Estonia" |x == "Hungary" |x == "Lithuania"  
+   |x == "Latvia" |x == "Poland" |x == "Slovakia" ~ "CentralEasternEurope",
+    x == "Spain" |x == "Portugal" |x == "Italy" |x == "Slovenia" |x == "Greece"~ "SouthernEurope",
+    x == "Denmark" |x == "Finland" |x == "Norway" |x == "Sweden" |x == "Iceland"~ "NorthernEurope",
+    .default = "WesternEurope"
+  )
+}
+
+paygap_selected_withregion <- paygap |>
+  rowwise() |>
+  mutate (Region= (findregion(Country)))
+
+paygap_dec <- paygap_selected_withregion
+
+paygap_selected_withregion <- paygap_selected_withregion |>
+  select(Region, Country, `2000`, `2001`, `2002`, `2003`, `2004`, `2005`, `2006`, `2007`, `2008`, `2009`, `2010`, `2011`, `2012`, `2013`, `2014`, `2015`)
+
+# Merge data based on 'Country' column
+merged_data <- inner_join(paygap_selected_withregion, gdp_selected, by = "Country")
+#colnames(merged_data)
+
+# Load the dataset
+data <-merged_data
+
+colnames(merged_data) <- sub("\\.x$", "paygap", colnames(merged_data))
+colnames(merged_data) <- sub("\\.y$", "gdp", colnames(merged_data))
+
+# Save the modified dataframe to a new CSV file
+new_file_path <- "modified_merged_data.csv"
+write_csv(data, new_file_path)
+
+merged_data <- read.csv("modified_merged_data.csv")
+
+```
+# ** Analysis**
+
+**Question 1a - Which countries showed the largest and smallest gender wage gaps? What did this look like year by year between 2000-2015 (all countries)?  **
+The plot below was created using plotly, to enable user interaction select and compare countries. 
+The key insights identified include:-
+
+1. South Korea consistently had the largest gender pay gap, approx 10 percentage points higher than the next country (which was Japan pre 2010 and Estonia post this year). Mean gap for South Korea was 38.81% during this time period.
+
+2. Costa Rica (mean 3.37) has the lowest pay gap, consistently below 5%. Note- for this country the data pre 2011 was the mean, as data was only available post 2011. Turkey (mean 4.18) and Slovenia (mean 5.29%), has the 2nd & 3rd lowest wage gaps during the 16 year timeframe.
+
+3. Almost all countries have seen a gender pay gap decreases between 2000 and 2010 but a number started to increase since then.
+
+4. Ireland's pay gap is roughly in the middle of the countries analysed, consistent with most Western European countries and follows the trend of gender pay gaps converging up to 2010-2012 and then starting to diverge again. It had a mean gap of 15.45% (18th out of 38) during this time period.
+
+5. Through this plot we found some similar trend between “near neighbours” e.g. South Korea\\Japan (close to the largest gap), Denmark\\Norway – consistently tracking 5-7%, Belgium\\Luxembourg (3-5%), which is analysed further in question 2.
+
+```{r fig.cap="Pay gap per country (2000-2015)", fig.height = 3, fig.width = 8}
+library(plotly)
+
+
+#pivoting pay gap data to enable drawing plots
+pay_gap_selected_plotdataset <- pivot_longer(paygap_selected_withregion,
+                                             cols = starts_with("2"),
+                                             names_to = "CalendarYear",
+                                             values_to = "Value")
+
+# #Create plots for the callouts listed above.
+
+p <- ggplot(pay_gap_selected_plotdataset, aes(x=CalendarYear, y=Value, text = paste("country:",Country) , color=Country)) +
+  geom_point() +
+  geom_smooth(se=FALSE,method=lm) +
+  theme(axis.text.x = element_text(angle = 90)) + ylab("Gender Pay Gap")
+
+ggplotly(p)
+```
+
+
+```{r include=FALSE}
+
+#Create tibble showing Mean per country in descending order
+pay_gap_selected_plotdataset |>
+  group_by(Country) |>
+  summarise(countryMean=mean(Value)) |>
+  arrange(desc(countryMean))
+
+```
+**Question 1b -  Which countries showed the largest and smallest gender wage gaps? What did this look like decade by decade since 1980 (for the 6 countries this data is available )?  **
+
+Plots show the following:-
+
+Plot 1 - Gender pay gap each decade for the 6 countries.
+Plot 2 - Average gender pay gap barplot in each of the 4 decades for the 6 countries.
+
+The key insights identified include:-
+
+1. The decade by decade line and bar plots, demonstrate a clear trend for 4 countries (Finland, Japan, United Kingdom and United States). Successive decades show the the pay gap declines for these countries. This decline is approximately 5% per decade for 3 of these 4 countries, demonstrating certain action plans being taken over the period of time in these countries in order to minimize the gender pay gap.
+
+2. Australia and Sweden seem to have a fluctuation in wage gap each year. Although Australia and Sweden are generally not demonstrating any clear trend between decades, a key observation to consider is that the mean pay gap in earlier years(80s) was less than the other countries(less than 20).  Despite not showing an ongoing gender pay gap reduction trend, the latest decade's average pay gap is still less than the 80s which proves the reduction in gap, over the years holds true for these countries as well. 
+
+
+```{r fig.cap="Gender PayGap trend by Decades", fig.height = 3, fig.width = 8}
+
+library(gridExtra)
+
+#pivot for better plotting
+paygap_long <- paygap_dec %>%
+  pivot_longer(cols = starts_with(c("1", "2")), names_to = "year", values_to = "wage_gap") %>%
+  mutate(year = as.integer(year))
+
+# Selecting the 6 countries to analyze
+selected_countries <- c("United Kingdom", "Australia", "Finland", "Japan", "United States", "Sweden")
+
+# Filtering data for the selected countries
+paygap_selected_countries <- paygap_long %>%
+  filter(Country %in% selected_countries)
+
+# Create a new column for grouping by decade timeperiod
+paygap_long <- paygap_selected_countries %>%
+  mutate(time_period = cut(year, breaks = c(1980, 1990, 2000, 2010, 2015),
+                           labels = c("1981-1990", "1991-2000", "2001-2010", "2011-2015")))%>%
+  filter(year %in% c(1981:1990, 1991:2000, 2001:2010, 2011:2015))
+  
+#y-axis range for consistency
+y_axis_range <- range(paygap_long$wage_gap, na.rm = TRUE)
+
+#custom color palette
+custom_palette <- c("#e41a1c", "#ff66b3", "#4daf4a", "#ff7f00", "#730099", "#009999")
+
+# Plot the pay gap trends for each time period
+plot1 <- ggplot(paygap_long, aes(x = factor(year), y = wage_gap, group = interaction(Country, time_period), color = Country)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(title = "Gender Pay Gap Trends by Decade (80s, 90s, 2000s, 2010s)",
+       x = "Year",
+       y = "Gender Pay Gap") +
+  scale_color_manual(values = custom_palette) +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 90)) +
+  theme(axis.text.x = element_text(size = 6))+
+  theme(plot.title = element_text(size = 8)) +
+  ylim(y_axis_range)
+
+# ggplot(paygap_long, aes(x = factor(year), y = wage_gap, group = interaction(Country, time_period), color = Country)) +
+#   geom_line(size = 1, alpha = 0.7) +
+#   geom_point(size = 2, alpha = 0.7) +
+#   labs(title = "Gender Pay Gap Trends by Decade (80s, 90s, 2000s, 2010s)",
+#        x = "Year",
+#        y = "Gender Pay Gap") +
+#   scale_color_manual(values = custom_palette) +
+#   facet_wrap(~Country, scales = "free_y") +  # Facet by country
+#   theme_minimal() +
+#   ylim(y_axis_range)
+
+# Calculate average wage gap for each country in each time period
+avg_wage_gap <- paygap_long %>%
+  group_by(Country, time_period) %>%
+  summarize(avg_wage_gap = mean(wage_gap, na.rm = TRUE), .groups = "drop")
+
+
+# Plot the average wage gap for each country in their respective time periods
+# ggplot(avg_wage_gap, aes(x = time_period, y = avg_wage_gap, group = Country, color = Country)) +
+#   geom_line(size = 1) +
+#   geom_point(size = 2) +
+#   geom_text(aes(label = round(avg_wage_gap, 2)), hjust = -0.2, vjust = -0.1, size = 4) +  # Add text labels
+#   labs(title = "Average Gender Pay Gap Trends by Decade",
+#        x = "Time Period",
+#        y = "Average Gender Pay Gap") +
+#   scale_color_manual(values = custom_palette) +
+#   theme_minimal()
+
+#Bar plot for average pay gap by decade
+plot2 <- ggplot(avg_wage_gap, aes(x = Country, y = avg_wage_gap, fill = time_period)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Average Pay Gap Bar plot",
+       x = "Country",
+       y = "Average Pay Gap",
+       fill = "Decade") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  theme(axis.text.x = element_text(size = 6))+
+  theme(plot.title = element_text(size = 8)) 
+# Create a boxplot
+# ggplot(paygap_long, aes(x = factor(time_period), y = wage_gap, fill = Country)) +
+#   geom_boxplot() +
+#   labs(title = "Boxplot of Gender Pay Gap Trends by Decade (80s, 90s, 2000s, 2010s)",
+#        x = "Decade",
+#        y = "Gender Pay Gap") +
+#   scale_fill_manual(values = custom_palette) +
+#   theme_minimal() +
+#   facet_wrap(~Country, scales = "free_y") + 
+#   ylim(y_axis_range)
+
+# Arrange plots side by side
+grid.arrange(plot1, plot2, ncol = 2, widths = c(2.5,1.5)) #,heights = c(0.8, 0.8))
+```
+
+**Question 2 -  Were there particular gender wage gap trends in certain regions in the world?  **
+Plot below shows gender pay gap and GDP per country in each region we defined.
+From reviewing the trends across 8 world regions, the key insights into gender pay gaps identified were as follows:-
+
+1. Western Europe region - Pay Gap: General downward trend across  over the 16 years , with Ireland and Luxembourg showing the most significant decreases. These 2 countries also have the highest GDPs in later years. The Netherlands experienced a sharp decrease in 2015. 
+
+2. Southern Europe -   Slovenia maintained the lowest and most stable pay gap over the 16 years. Other countries in this region (Portugal, Spain, Italy and Greece) all showed GDP growth up until 2008 but decreased from then until 2013 - This co-incided with the financial crises affecting these countries. In these countries, the pay gap fluctuated a lot over the 16 years and in Portugal it increased since 2010
+
+3. Northern Europe:- Iceland showed significant volatility between 2006 and 2010, in both pay gap and GDP. This co-incided with the time period that the financial crises impacted this country. Norway and Denmark maintain low (5-10%) and stable pay gaps, closely mirroring each other, throughout the period of analysis.
+
+4. Central and Eastern Europe. All of these countries had GDP increases over the 16 years, except for decreases between 2007-2009.  Estonia is the outlier in these countries and has the highest pay gap of over 25% throughout the period of analysis. Most other countries in this regions remained relatively stable until 2011 from which time their gap started to widen again.
+```{r  fig.height = 3, fig.width = 8}
+library(shiny)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(readr)
+
+server <- function(input, output) {
+    
+    regionData <- reactive({
+        req(input$regionSelect) 
+        merged_data %>%
+            filter(Region == input$regionSelect)
+    })
+    
+    
+    countryData <- reactive({
+        req(input$countrySelect) 
+        merged_data %>%
+            filter(Country == input$countrySelect)
+    })
+
+    # Plot for Pay Gap over time by region
+    output$paygapPlot <- renderPlot({
+        data <- regionData()
+        data_long <- data %>%
+            pivot_longer(cols = ends_with(".x"), names_to = "Year_Indicator", values_to = "PayGap") %>%
+            mutate(Year = as.numeric(sub("X", "", sub("\\.x", "", Year_Indicator)))) 
+        ggplot(data_long, aes(x = Year, y = PayGap, group = Country, color = Country)) +
+            geom_line() +
+            theme_minimal() +
+            labs(title = "Pay Gap Over Time", x = "Year", y = "Pay Gap (%)")
+    })
+
+    # Plot for GDP over time by region
+    output$gdpPlot <- renderPlot({
+        data <- regionData()
+        data_long <- data %>%
+            pivot_longer(cols = ends_with(".y"), names_to = "Year_Indicator", values_to = "GDP") %>%
+            mutate(Year = as.numeric(sub("X", "", sub("\\.y", "", Year_Indicator)))) 
+        ggplot(data_long, aes(x = Year, y = GDP, group = Country, color = Country)) +
+            geom_line() +
+            theme_minimal() +
+            labs(title = "GDP Over Time", x = "Year", y = "GDP (USD)")
+    })
+
+# Plot for Pay Gap over time by country
+    output$countryPaygapPlot <- renderPlot({
+        data <- countryData()
+        data_long <- data %>%
+            pivot_longer(cols = ends_with(".x"), names_to = "Year_Indicator", values_to = "PayGap") %>%
+            mutate(Year = as.numeric(sub("X", "", sub("\\.x", "", Year_Indicator)))) 
+        ggplot(data_long, aes(x = Year, y = PayGap)) +
+            geom_line() +
+            theme_minimal() +
+            labs(title = paste("Pay Gap Over Time -", input$countrySelect), x = "Year", y = "Pay Gap (%)")
+    })
+
+    # Plot for GDP over time by country
+    output$countryGdpPlot <- renderPlot({
+        data <- countryData()
+        data_long <- data %>%
+            pivot_longer(cols = ends_with(".y"), names_to = "Year_Indicator", values_to = "GDP") %>%
+            mutate(Year = as.numeric(sub("X", "", sub("\\.y", "", Year_Indicator)))) 
+        ggplot(data_long, aes(x = Year, y = GDP)) +
+            geom_line() +
+            theme_minimal() +
+            labs(title = paste("GDP Over Time -", input$countrySelect), x = "Year", y = "GDP (USD)")
+    })
+}
+
+
+#---------------------------------------
+
+# Define the UI for the application
+ui <- fluidPage(
+    titlePanel("Data Visualization"),
+    tabsetPanel(
+        tabPanel("By Region",
+            selectInput("regionSelect", "Select a Region:", choices = unique(merged_data$Region)),
+            plotOutput("paygapPlot"),
+            plotOutput("gdpPlot")
+        ),
+        tabPanel("By Country",
+            selectInput("countrySelect", "Select a Country:", choices = unique(merged_data$Country)),
+            plotOutput("countryPaygapPlot"),
+            plotOutput("countryGdpPlot")
+        )
+    )
+)
+
+
+# Run the application
+shinyApp(ui = ui, server = server)
+
+```
+
+**Question 3 -  What correlation (if any) is evident between the gender wage gap and a country’s gdp?  **
+Plots below show the following:-
+1. Correlation between pay gap and GDP columns.
+2. 10 Highest and Lowest countries by GDP.
+3. 10 Highest and Lowest countries by gender pay gap.
+
+The key insights derived from this analysis include:-
+1.The correlation data between pay gap and GDP from 2000 to 2015 generally shows a negative trend, indicating that as GDP increases, the pay gap tends to decrease and vice versa. Some years, like 2000, 2001, 2006, and 2013, display stronger negative correlations, suggesting a clearer association between higher GDP and lower pay gaps. However, in years between 2010 and 2015, the correlations are weaker, indicating less consistent links between GDP changes and pay gap variations.
+
+2.Paygap : Low pay gap countries, dominated by European nations like Denmark, Norway, and Slovenia, exhibit consistent efforts in narrowing gender wage disparities. Countries such as Costa Rica and Colombia maintain minimal variations, underscoring a sustained commitment to equality. In contrast, high pay gap nations encompass diverse regions—North America, Europe (Austria, UK, Estonia), and Asia (Japan, South Korea). While some, like Japan and South Korea, persistently maintain high gaps, others, despite high GDP, struggle to reduce disparities. This underlines that while economic prosperity might influence, it doesn't guarantee diminished gaps. 
+
+3.GDP : Countries like Costa Rica and Colombia, despite their low GDP, consistently maintain remarkably low pay gaps, demonstrating a strong commitment to gender wage equality. However, within lower GDP nations like Hungary and Slovakia, disparities fluctuate, highlighting a complex relationship between economic status and gender pay equality. Meanwhile, moderate GDP countries such as Mexico and Chile exhibit mid-level pay gaps that vary over time due to diverse socio-cultural influences. The presence of countries like Latvia and Poland, with moderate GDP but higher pay gaps, underscores that societal dynamics beyond economic factors significantly impact wage disparities. Overall, while GDP has some influence, varied socio-cultural contexts play a substantial role in a nation's gender pay gap."
+```{r fig.height = 3, fig.width = 8}
+library(gridExtra)
+library(reshape2)
+library(ggplot2)
+
+merged_data11 <- merged_data
+pay_gap_cols <- grep("\\.x$", names(merged_data11))
+gdp_cols <- grep("\\.y$", names(merged_data11))
+
+
+renamed_pay_gap_cols <- paste0("year_paygap_", gsub("\\.x$", "", names(merged_data11)[pay_gap_cols]))
+renamed_gdp_cols <- paste0("year_gdp_", gsub("\\.y$", "", names(merged_data11)[gdp_cols]))
+
+
+names(merged_data11)[pay_gap_cols] <- renamed_pay_gap_cols
+names(merged_data11)[gdp_cols] <- renamed_gdp_cols
+
+#extracting data from 2000 to 2015
+years_needed <- as.character(2000:2015)
+
+
+columns_to_extract <- grep(paste(years_needed, collapse = "|"), names(merged_data11))
+extracted_data1 <- merged_data11[, columns_to_extract]
+country_region <- merged_data11[, c("Country", "Region")]
+extracted_data1 <- cbind(country_region, extracted_data1)
+extracted_data_2000_2015 <- extracted_data1[, !duplicated(names(extracted_data1))]
+extracted_data_2000_2015 <- extracted_data1[, !duplicated(names(extracted_data1))]
+write.csv(extracted_data_2000_2015, file = "extracted_data_2000_2015.csv", row.names = FALSE)
+
+
+
+pay_gap_cols <- names(extracted_data1)[grep("^year_paygap_X", names(extracted_data1))]
+gdp_cols <- names(extracted_data1)[grep("^year_gdp_X", names(extracted_data1))]
+
+pay_gap_data <- extracted_data_2000_2015[, pay_gap_cols]
+gdp_data <- extracted_data_2000_2015[, gdp_cols]
+
+
+# correlation between pay gap and GDP columns
+correlation_matrix <- cor(pay_gap_data, gdp_data, use = "complete.obs")
+
+correlation_df <- melt(correlation_matrix)
+
+# Plotting heatmap with correlation coefficient values
+plot1 <- ggplot(correlation_df, aes(Var1, Var2, fill = value)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(value, 2)), color = "black", size = 3) +  # Display correlation values
+  scale_fill_gradient2(low = "red", mid = "white", high = "green", midpoint = 0, limits = c(-1, 1),
+                       name = "Correlation", labels = scales::number_format(accuracy = 0.1)) +
+  labs(title = "Relationship between Pay Gap and GDP (Correlation Heatmap)",
+       x = "PAYGAP",
+       y = "GDP") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+plot1
+```
+```{r fig.height = 3, fig.width = 8}
+# top 10 countries with the lowest mean pay gap
+pay_gap_data <- extracted_data1[, pay_gap_cols]
+extracted_data1$Mean_PayGap <- rowMeans(pay_gap_data, na.rm = TRUE)
+
+top_10_lowest_paygap <- head(extracted_data1[order(extracted_data1$Mean_PayGap), ], 10)
+
+plot2 <- ggplot(top_10_lowest_paygap, aes(x = reorder(Country, Mean_PayGap), y = Mean_PayGap)) +
+  geom_bar(stat = "identity", fill = "violet", alpha = 0.7) +
+  labs(title = "Top 10 Countries (LowestPayGap)",
+       x = "Country",
+       y = "Mean Pay Gap") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
+pay_gap_data <- extracted_data1[, pay_gap_cols]
+extracted_data1$Mean_PayGap <- rowMeans(pay_gap_data, na.rm = TRUE)
+top_10_highest_paygap <- tail(extracted_data1[order(extracted_data1$Mean_PayGap), ], 10)
+
+# top 10 countries with the highest mean pay gap
+library(ggplot2)
+
+ plot3 <- ggplot(top_10_highest_paygap, aes(x = reorder(Country, Mean_PayGap), y = Mean_PayGap)) +
+  geom_bar(stat = "identity", fill = "pink", alpha = 0.7) +
+  labs(title = "Top 10 Countries (HighestPayGap)",
+       x = "Country",
+       y = "Mean Pay Gap" ) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+gdp_cols <- names(extracted_data1)[grep("^year_gdp_X", names(extracted_data1))]
+
+
+
+# top 10 countries with the highest mean GDP
+gdp_data <- extracted_data1[, gdp_cols]
+extracted_data1$Mean_GDP <- rowMeans(gdp_data, na.rm = TRUE)
+top_10_highest_gdp <- tail(extracted_data1[order(extracted_data1$Mean_GDP), ], 10)
+
+plot4 <-  ggplot(top_10_highest_gdp, aes(x = reorder(Country, Mean_GDP), y = Mean_GDP)) +
+  geom_bar(stat = "identity", fill = "orange", alpha = 0.7) +
+  labs(title = "Top10 Countries(HighestGDP)",
+       x = "Country",
+       y = "Mean GDP") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 0.5))
+
+
+#  top 10 countries with the lowest mean GDP
+gdp_data <- extracted_data1[, gdp_cols]
+extracted_data1$Mean_GDP <- rowMeans(gdp_data, na.rm = TRUE)
+top_10_lowest_gdp <- head(extracted_data1[order(extracted_data1$Mean_GDP), ], 10)
+
+plot5 <- ggplot(top_10_lowest_gdp, aes(x = reorder(Country, Mean_GDP), y = Mean_GDP)) +
+  geom_bar(stat = "identity", fill = "cyan" ,alpha = 0.7) +
+  labs(title = "Top10 Countries (LowestGDP)",
+       x = "Country",
+       y = "Mean GDP") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 0.5))
+ 
+
+grid.arrange(plot4, plot5, ncol = 2 )
+grid.arrange(plot2, plot3, ncol = 2) 
+
+```
+
+# **Conclusions**
+1. The correlation between a country's GDP and the gender wage gap varies between 2000 and 2015. Generally, there's a mildly negative correlation implying that as GDP increases, the gender wage gap tends to decrease, but this isn't universally consistent (especially in Asia and a handful of European countries). Certain lower GDP countries exhibit low wage gaps, while some high GDP nations struggle with persistent disparities, indicating that economic wealth doesn't singularly alleviate gender wage gaps.
+
+2.The gender pay gap trend decade on decade since the 80s, shows that the wage gap is generally on the decline. This shows that over this time, a change in wage structure for major countries is observed and in recent years, a trend towards equal pay is reaching almost every corner of the world. If this trend continues, we can expect very minimal pay gap differences across the world in upcoming years.
+
+3. Asian countries have consistent large gender pay gaps,despite some convergence since 2000. Aside from Estonia,  European, North American and Oceania countries vary between (10-20) and lower (<10) percentage gender pay gaps. These countries had mid-high GDPs and their pay gaps typically reduced over the time period 2000-2016, with a small number of exceptions showing divergence again post 2010.
+
+```{r}
+```
+# **Areas of Ownership**
+Malli - Setup Google Collab for code sharing.Filtered and merged pay-gap and GDP datasets based on the country and created a merged_data for further analysis. Created interactive UI for plotting GDP based on years, pay gap based on years region-wise and country-wise.Analysed the graphs and got the insights for different regions
+
+Mark-Managed the overall project, including creating report template.Data Wrangling - Programmatically added missing data in gdp gender gap (mean) dataset as well as adding functionality to include region information.
+Coded, plotted and analysed data to answer question 1a
+
+Swathi -Data wrangling : merged  Paygap and GDP dataset, renamed the columnn names and extracted the data from 2000 to 2015 and created new dataset which contains the data from 2000 to 2015. Coded, Plotted the heat map,plotted top 10 countries with highest and lowest (gdp ,paygap) and analysed these.
+
+Udit -Setup up the initial and subsequent group meetings. Examined data, coded, analyzed and visualized data for Question 1b where trends by time period(decade) was inspected to observe whether the changes tends to move towards equal pay across the different nations.
